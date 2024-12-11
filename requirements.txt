@@ -2,3 +2,8 @@ scrapy
 scrapy-playwright
 playwright
 pika
+flask
+pymongo
+motor
+flake8
+black
