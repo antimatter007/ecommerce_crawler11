@@ -1,47 +1,57 @@
 # app.py
 
 from flask import Flask, request, jsonify
-import subprocess
-import threading
-import json
-import os
+import scrapy
+from scrapy.crawler import CrawlerRunner
+from scrapy.utils.project import get_project_settings
+from ecommerce_crawler.spiders.product_spider import ProductSpider
+import asyncio
 
 app = Flask(__name__)
 
-def run_spider(domains):
-    # Run the Scrapy spider with specified domains
-    cmd = [
-        "scrapy",
-        "crawl",
-        "product_spider",
-        "-a",
-        f"domains={domains}",
-        "--loglevel",
-        "INFO"
-    ]
-    subprocess.run(cmd)
-
 @app.route('/run-crawler', methods=['POST'])
 def run_crawler():
-    data = request.json
+    data = request.get_json()
     domains = data.get('domains', '')
+
     if not domains:
         return jsonify({"error": "No domains provided"}), 400
 
-    # Run the spider in a separate thread
-    thread = threading.Thread(target=run_spider, args=(domains,))
-    thread.start()
+    # Get Scrapy settings
+    settings = get_project_settings()
 
-    return jsonify({"status": "Crawler started"}), 200
+    # Create a new event loop for asyncio
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
 
-@app.route('/get-results', methods=['GET'])
-def get_results():
+    # Initialize CrawlerRunner with settings
+    runner = CrawlerRunner(settings=settings)
+
+    # Create a list to store scraped data
+    scraped_data = {}
+
+    async def crawl():
+        # Initialize the spider with domains
+        spider = ProductSpider(domains=domains)
+
+        # Start crawling
+        await runner.crawl(spider)
+
+        # After crawling, retrieve the data
+        return spider.product_urls
+
     try:
-        with open("product_urls.json", "r") as f:
-            data = json.load(f)
-        return jsonify(data), 200
-    except FileNotFoundError:
-        return jsonify({"error": "No results found"}), 404
+        # Run the crawl coroutine
+        scraped_data = loop.run_until_complete(crawl())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        loop.close()
+
+    # Convert sets to lists for JSON serialization
+    serialized_data = {domain: list(urls) for domain, urls in scraped_data.items()}
+
+    return jsonify(serialized_data), 200
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8000)

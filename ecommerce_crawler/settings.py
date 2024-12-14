@@ -29,10 +29,10 @@ DOWNLOAD_HANDLERS = {
     "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
 }
 
-PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 10000  # 10 seconds
+PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT = 5000  
 
-# Stop after 5 minutes
-CLOSESPIDER_TIMEOUT = 300
+# Stop after 1 minutes
+CLOSESPIDER_TIMEOUT = 60
 
 # Limit depth to 2 levels
 DEPTH_LIMIT = 5

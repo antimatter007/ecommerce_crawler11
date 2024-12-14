@@ -2,7 +2,6 @@
 
 import scrapy
 import re
-import json
 from urllib.parse import urljoin, urlparse
 from collections import defaultdict
 from scrapy_playwright.page import PageMethod
@@ -20,6 +19,22 @@ class ProductSpider(scrapy.Spider):
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
             ],
+        },
+        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 60000,  # 60 seconds
+        "CONCURRENT_REQUESTS": 16,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_DELAY": 0.5,
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": 1,
+        "AUTOTHROTTLE_MAX_DELAY": 30,
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 8.0,
+        "AUTOTHROTTLE_DEBUG": False,
+        "DEPTH_LIMIT": 5,
+        "ROBOTSTXT_OBEY": True,
+        "LOG_LEVEL": "INFO",
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+            "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
         },
     }
 
@@ -144,8 +159,5 @@ class ProductSpider(scrapy.Spider):
             self.logger.error(f"Unhandled exception on {request.url}")
 
     def closed(self, reason):
-        # Output results in product_urls.json mapping each domain to its list of product URLs
-        output = {domain: sorted(urls) for domain, urls in self.product_urls.items()}
-        with open("product_urls.json", "w") as f:
-            json.dump(output, f, indent=4)
-        self.logger.info("Crawling completed. Product URLs saved to product_urls.json")
+        # This method is no longer needed as we collect data in memory
+        self.logger.info("Spider closed: %s", reason)
