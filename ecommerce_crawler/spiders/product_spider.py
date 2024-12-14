@@ -21,6 +21,22 @@ class ProductSpider(scrapy.Spider):
                 "--disable-setuid-sandbox",
             ],
         },
+        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 30000,  # 30 seconds
+        "CONCURRENT_REQUESTS": 16,
+        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
+        "DOWNLOAD_DELAY": 0.5,
+        "AUTOTHROTTLE_ENABLED": True,
+        "AUTOTHROTTLE_START_DELAY": 1,
+        "AUTOTHROTTLE_MAX_DELAY": 30,
+        "AUTOTHROTTLE_TARGET_CONCURRENCY": 8.0,
+        "AUTOTHROTTLE_DEBUG": False,
+        "DEPTH_LIMIT": 5,
+        "ROBOTSTXT_OBEY": True,
+        "LOG_LEVEL": "INFO",
+        "DOWNLOAD_HANDLERS": {
+            "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+            "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+        },
     }
 
     # Define product URL patterns (add more patterns as needed)
