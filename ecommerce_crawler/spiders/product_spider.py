@@ -1,21 +1,29 @@
+# ecommerce_crawler/spiders/product_spider.py
+
 import scrapy
 import re
+import json
 from urllib.parse import urljoin, urlparse
 from collections import defaultdict
 from scrapy_playwright.page import PageMethod
-from ecommerce_crawler.queue_manager import QueueManager
-from twisted.internet import reactor, defer
-import json
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 class ProductSpider(scrapy.Spider):
     name = "product_spider"
 
     custom_settings = {
         "PLAYWRIGHT_BROWSER_TYPE": "chromium",
-        "PLAYWRIGHT_LAUNCH_OPTIONS": {"headless": True},
+        "PLAYWRIGHT_LAUNCH_OPTIONS": {
+            "headless": True,
+            "timeout": 60000,  # 60 seconds
+            "args": [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+            ],
+        },
     }
 
-    # Patterns to detect product URLs
+    # Define product URL patterns (add more patterns as needed)
     PRODUCT_PATTERNS = [
         re.compile(r"/product/[\w-]+"),
         re.compile(r"/item/[\w-]+"),
@@ -25,31 +33,35 @@ class ProductSpider(scrapy.Spider):
         re.compile(r"/detail/[\w-]+"),
         re.compile(r"/store/[\w-]+"),
         re.compile(r"/goods/[\w-]+"),
+        # eBay-specific patterns
+        re.compile(r"/itm/\d+"),
+        # Amazon-specific patterns
+        re.compile(r"/dp/[A-Z0-9]{10}"),
+        re.compile(r"/gp/product/[A-Z0-9]{10}"),
     ]
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, domains=None, *args, **kwargs):
         super(ProductSpider, self).__init__(*args, **kwargs)
+        if domains:
+            self.start_domains = [d.strip() for d in domains.split(",")]
+            self.start_urls = [f"https://{domain}" for domain in self.start_domains]
+            self.allowed_domains = [urlparse(u).netloc for u in self.start_urls]
+        else:
+            self.logger.error("No domains provided. Use -a domains=\"example1.com,example2.com\"")
+            self.start_urls = []
+            self.allowed_domains = []
+
         self.product_urls = defaultdict(set)
-        self.queue_manager = QueueManager()
+        self.seen_urls = set()
 
     def start_requests(self):
-        # Start consuming URLs from RabbitMQ
-        d = defer.Deferred()
-        reactor.callLater(0, self.consume_from_queue, d)
-        return []
-
-    def consume_from_queue(self, deferred):
-        def callback(ch, method, properties, body):
-            url = body.decode('utf-8')
-            self.logger.info(f"Received URL from queue: {url}")
-
-            req = scrapy.Request(
+        for url in self.start_urls:
+            yield scrapy.Request(
                 url,
                 meta={
                     "playwright": True,
                     "playwright_page_methods": [
                         PageMethod("wait_for_load_state", "networkidle"),
-                        # Handle infinite scrolling if necessary
                         PageMethod("evaluate", """
                             async () => {
                                 let previousHeight = 0;
@@ -63,48 +75,76 @@ class ProductSpider(scrapy.Spider):
                             }
                         """),
                     ],
+                    "playwright_include_page": True,
+                    "errback": self.errback_httpbin,
                 },
                 callback=self.parse,
-                errback=lambda f: self.handle_error(f, ch, method)
             )
-            self.crawler.engine.crawl(req, self)
-            self.queue_manager.ack_message(method.delivery_tag)
 
-        self.queue_manager.consume_urls(callback)
-
-    def parse(self, response):
+    async def parse(self, response):
         domain = urlparse(response.url).netloc
+
+        # Extract all links from the current page
         links = response.css('a::attr(href)').getall()
-        seen_urls = self.crawler.stats.get_value("seen_urls", set()) or set()
 
         for link in links:
             absolute_url = urljoin(response.url, link)
             parsed_url = urlparse(absolute_url)
+
+            # Normalize URL by removing fragments and query parameters
             normalized_url = parsed_url._replace(fragment="", query="").geturl()
 
+            # Ensure the link is within the allowed domains
             if parsed_url.netloc not in self.allowed_domains:
                 continue
 
+            # Check if the URL has already been seen
+            if normalized_url in self.seen_urls:
+                continue
+
+            self.seen_urls.add(normalized_url)
+
+            # Check if the URL matches any product pattern
             if any(pattern.search(parsed_url.path) for pattern in self.PRODUCT_PATTERNS):
                 self.product_urls[domain].add(normalized_url)
+                self.logger.info(f"Found product URL: {normalized_url}")
+                yield {
+                    'domain': domain,
+                    'url': normalized_url,
+                }
             else:
-                if normalized_url not in seen_urls:
-                    seen_urls.add(normalized_url)
-                    self.crawler.stats.set_value("seen_urls", seen_urls)
-                    self.queue_manager.publish_url(normalized_url)
+                # For non-product pages, continue crawling
+                yield scrapy.Request(
+                    normalized_url,
+                    meta={
+                        "playwright": True,
+                        "playwright_page_methods": [
+                            PageMethod("wait_for_load_state", "networkidle"),
+                        ],
+                        "errback": self.errback_httpbin,
+                    },
+                    callback=self.parse,
+                    dont_filter=True,  # Allow retries
+                )
 
-        # Yield item for pipeline
-        yield {
-            'domain': domain,
-            'urls': list(self.product_urls[domain])
-        }
+    def errback_httpbin(self, failure):
+        self.logger.error(repr(failure))
+        request = failure.request
 
-    def handle_error(self, failure, ch, method):
-        self.logger.warning(f"Request failed: {failure.request.url}, reason: {failure.value}")
-        self.queue_manager.ack_message(method.delivery_tag)
+        if failure.check(PlaywrightTimeoutError):
+            self.logger.error(f"TimeoutError on {request.url}")
+            # Optionally retry the request
+            yield request.copy().replace(dont_filter=True)
+        elif failure.check(scrapy.spidermiddlewares.httperror.HttpError):
+            response = failure.value.response
+            self.logger.error(f"HttpError on {response.url}: {response.status}")
+        elif failure.check(scrapy.exceptions.IgnoreRequest):
+            self.logger.error(f"Ignored request: {request.url}")
+        else:
+            self.logger.error(f"Unhandled exception on {request.url}")
 
     def closed(self, reason):
-        # Optionally output to JSON or just rely on MongoDB
+        # Output results in product_urls.json mapping each domain to its list of product URLs
         output = {domain: sorted(urls) for domain, urls in self.product_urls.items()}
         with open("product_urls.json", "w") as f:
             json.dump(output, f, indent=4)

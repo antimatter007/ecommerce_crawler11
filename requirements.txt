@@ -1,9 +1,5 @@
-scrapy
-scrapy-playwright
-playwright
-pika
-flask
-pymongo
-motor
-flake8
-black
+scrapy>=2.8.0,<3.0.0
+scrapy-playwright>=0.0.35
+scrapy-user-agents>=0.1.1
+playwright>=1.35.0
+six>=1.16.0

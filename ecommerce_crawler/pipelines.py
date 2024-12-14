@@ -1,42 +1,22 @@
-import motor.motor_asyncio
-from urllib.parse import urlparse
-from collections import defaultdict
-import os
+import json
 
-class MongoDBPipeline:
-    def __init__(self, mongo_uri, mongo_db):
-        self.mongo_uri = mongo_uri
-        self.mongo_db = mongo_db
+class EcommerceCrawlerPipeline:
+    def open_spider(self, spider):
+        self.product_data = {}
 
-    @classmethod
-    def from_crawler(cls, crawler):
-        return cls(
-            mongo_uri=crawler.settings.get('MONGO_URI'),
-            mongo_db=crawler.settings.get('MONGO_DATABASE', 'ecommerce'),
-        )
+    def close_spider(self, spider):
+        # Convert sets to lists for JSON serialization
+        serializable_data = {domain: list(urls) for domain, urls in self.product_data.items()}
+        with open('output/product_urls.json', 'w', encoding='utf-8') as f:
+            json.dump(serializable_data, f, ensure_ascii=False, indent=4)
 
-    async def open_spider(self, spider):
-        self.client = motor.motor_asyncio.AsyncIOMotorClient(self.mongo_uri)
-        self.db = self.client[self.mongo_db]
-        self.collection = self.db['product_urls']
-
-    async def close_spider(self, spider):
-        self.client.close()
-
-    async def process_item(self, item, spider):
+    def process_item(self, item, spider):
         domain = item['domain']
-        urls = item['urls']
-        if not urls:
-            return item
-
-        operations = []
-        for url in urls:
-            operations.append(
-                self.collection.update_one(
-                    {'domain': domain, 'url': url},
-                    {'$set': {'domain': domain, 'url': url}},
-                    upsert=True
-                )
-            )
-        await self.collection.bulk_write(operations)
+        url = item['url']
+        
+        if domain not in self.product_data:
+            self.product_data[domain] = set()
+        
+        self.product_data[domain].add(url)
+        
         return item
