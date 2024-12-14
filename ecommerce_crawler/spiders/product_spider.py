@@ -1,4 +1,4 @@
-# ecommerce_crawler/spiders/product_spider.py
+# ecommerce_crawler/ecommerce_crawler/spiders/product_spider.py
 
 import scrapy
 import re
@@ -21,25 +21,8 @@ class ProductSpider(scrapy.Spider):
                 "--disable-setuid-sandbox",
             ],
         },
-        "PLAYWRIGHT_DEFAULT_NAVIGATION_TIMEOUT": 30000,  # 30 seconds
-        "CONCURRENT_REQUESTS": 16,
-        "CONCURRENT_REQUESTS_PER_DOMAIN": 8,
-        "DOWNLOAD_DELAY": 0.5,
-        "AUTOTHROTTLE_ENABLED": True,
-        "AUTOTHROTTLE_START_DELAY": 1,
-        "AUTOTHROTTLE_MAX_DELAY": 30,
-        "AUTOTHROTTLE_TARGET_CONCURRENCY": 8.0,
-        "AUTOTHROTTLE_DEBUG": False,
-        "DEPTH_LIMIT": 5,
-        "ROBOTSTXT_OBEY": True,
-        "LOG_LEVEL": "INFO",
-        "DOWNLOAD_HANDLERS": {
-            "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-            "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
-        },
     }
 
-    # Define product URL patterns (add more patterns as needed)
     PRODUCT_PATTERNS = [
         re.compile(r"/product/[\w-]+"),
         re.compile(r"/item/[\w-]+"),
@@ -49,11 +32,11 @@ class ProductSpider(scrapy.Spider):
         re.compile(r"/detail/[\w-]+"),
         re.compile(r"/store/[\w-]+"),
         re.compile(r"/goods/[\w-]+"),
-        # eBay-specific patterns
+        # eBay-specific pattern
         re.compile(r"/itm/\d+"),
         # Amazon-specific patterns
         re.compile(r"/dp/[A-Z0-9]{10}"),
-        re.compile(r"/gp/product/[A-Z0-9]{10}"),
+        re.compile(r"/gp/product/[A-Z0-9]{10}")
     ]
 
     def __init__(self, domains=None, *args, **kwargs):
@@ -77,7 +60,7 @@ class ProductSpider(scrapy.Spider):
                 meta={
                     "playwright": True,
                     "playwright_page_methods": [
-                        PageMethod("wait_for_load_state", "networkidle"),
+                        PageMethod("wait_for_load_state", "domcontentloaded"),
                         PageMethod("evaluate", """
                             async () => {
                                 let previousHeight = 0;
@@ -99,28 +82,21 @@ class ProductSpider(scrapy.Spider):
 
     async def parse(self, response):
         domain = urlparse(response.url).netloc
-
-        # Extract all links from the current page
         links = response.css('a::attr(href)').getall()
 
         for link in links:
             absolute_url = urljoin(response.url, link)
             parsed_url = urlparse(absolute_url)
-
-            # Normalize URL by removing fragments and query parameters
             normalized_url = parsed_url._replace(fragment="", query="").geturl()
 
-            # Ensure the link is within the allowed domains
             if parsed_url.netloc not in self.allowed_domains:
                 continue
 
-            # Check if the URL has already been seen
             if normalized_url in self.seen_urls:
                 continue
 
             self.seen_urls.add(normalized_url)
 
-            # Check if the URL matches any product pattern
             if any(pattern.search(parsed_url.path) for pattern in self.PRODUCT_PATTERNS):
                 self.product_urls[domain].add(normalized_url)
                 self.logger.info(f"Found product URL: {normalized_url}")
@@ -129,18 +105,17 @@ class ProductSpider(scrapy.Spider):
                     'url': normalized_url,
                 }
             else:
-                # For non-product pages, continue crawling
                 yield scrapy.Request(
                     normalized_url,
                     meta={
                         "playwright": True,
                         "playwright_page_methods": [
-                            PageMethod("wait_for_load_state", "networkidle"),
+                            PageMethod("wait_for_load_state", "domcontentloaded"),
                         ],
                         "errback": self.errback_httpbin,
                     },
                     callback=self.parse,
-                    dont_filter=True,  # Allow retries
+                    dont_filter=True,
                 )
 
     def errback_httpbin(self, failure):
@@ -148,23 +123,18 @@ class ProductSpider(scrapy.Spider):
         request = failure.request
 
         if failure.check(PlaywrightTimeoutError):
-            self.logger.error(f"TimeoutError on {request.url}")
-            # Optionally retry the request
+            self.logger.error(f"TimeoutError on {request.url}, retrying...")
             yield request.copy().replace(dont_filter=True)
         elif failure.check(scrapy.spidermiddlewares.httperror.HttpError):
             response = failure.value.response
             self.logger.error(f"HttpError on {response.url}: {response.status}")
-        elif failure.check(scrapy.exceptions.IgnoreRequest):
-            self.logger.error(f"Ignored request: {request.url}")
+            if response.status in [403, 429]:
+                self.logger.error(f"Likely blocked on {response.url}")
         else:
             self.logger.error(f"Unhandled exception on {request.url}")
 
     def closed(self, reason):
-        """
-        Called when the spider is closed.
-        Writes the scraped product URLs to 'product_urls.json'.
-        """
-        # Convert sets to lists for JSON serialization
+        # Write out product URLs
         output = {domain: sorted(urls) for domain, urls in self.product_urls.items()}
         with open("product_urls.json", "w") as f:
             json.dump(output, f, indent=4)

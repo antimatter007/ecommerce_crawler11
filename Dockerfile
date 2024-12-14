@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
 # Install Playwright and browsers
 RUN pip install --upgrade pip
 RUN pip install playwright
+RUN playwright install chromium
 RUN playwright install --with-deps
 
 # Install Python dependencies
