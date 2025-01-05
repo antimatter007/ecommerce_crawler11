@@ -1,36 +1,52 @@
-# Use an official Python 3.11 runtime as a parent image
+# Dockerfile
+
 FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    wget \
+    curl \
+    gnupg \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Playwright dependencies (if using Scrapy-Playwright)
+RUN apt-get update && apt-get install -y \
+    libnss3 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2 \
+    libatspi2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    gcc \
-    libffi-dev \
-    libssl-dev \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Playwright and browsers
-RUN pip install --upgrade pip
-RUN pip install playwright
-RUN playwright install chromium
-RUN playwright install --with-deps
+# Copy project files
+COPY . /app
 
 # Install Python dependencies
-COPY requirements.txt /app/
+RUN pip install --no-cache-dir --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the project files
-COPY . /app/
+# Install Playwright browsers (if using Scrapy-Playwright)
+RUN playwright install chromium
 
-# Expose port 8000 for the Flask app
-EXPOSE 8000
+# Copy supervisord configuration
+COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
-# Define the default command to run the Flask app
-CMD ["python", "app.py"]
+# Expose ports
+EXPOSE 8000 
+EXPOSE 5555 
+
+# Start Supervisor
+CMD ["/usr/bin/supervisord"]

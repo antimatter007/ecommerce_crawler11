@@ -1,0 +1,157 @@
+<!-- app/templates/index.html -->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Product URL Crawler</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .error { color: red; }
+        .status { color: green; }
+        .results { margin-top: 20px; }
+        .loader {
+            border: 16px solid #f3f3f3;
+            border-top: 16px solid #3498db;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 2s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <script>
+        async function startCrawler() {
+            const domains = document.getElementById('domains').value;
+            if (!domains) {
+                alert("Please enter at least one domain.");
+                return;
+            }
+
+            // Show loader
+            document.getElementById('loader').style.display = 'block';
+
+            const formData = new FormData();
+            formData.append('domains', domains);
+
+            const response = await fetch('/run-crawler', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+            if (response.ok) {
+                document.getElementById('status').innerText = result.status;
+            } else {
+                document.getElementById('status').innerText = result.detail;
+            }
+
+            // Hide loader
+            document.getElementById('loader').style.display = 'none';
+        }
+
+        async function fetchResults() {
+            const domainFilter = document.getElementById('domain-filter').value;
+            let url = '/get-results';
+            if (domainFilter) {
+                url += `?domain=${encodeURIComponent(domainFilter)}`;
+            }
+            const response = await fetch(url);
+            const data = await response.json();
+            const resultsDiv = document.getElementById('results');
+            resultsDiv.innerHTML = '';
+            if (data.detail) {
+                resultsDiv.innerHTML = `<p class="error">${data.detail}</p>`;
+                return;
+            }
+            if (data.length === 0) {
+                resultsDiv.innerHTML = `<p>No product URLs found.</p>`;
+                return;
+            }
+            const ul = document.createElement('ul');
+            data.forEach(item => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = item.url;
+                a.target = '_blank';
+                a.textContent = item.url;
+                li.appendChild(a);
+                ul.appendChild(li);
+            });
+            resultsDiv.appendChild(ul);
+        }
+
+        async function fetchPartialResults() {
+            const domainFilter = document.getElementById('domain-filter').value;
+            let url = '/get-partial-results';
+            if (domainFilter) {
+                url += `?domain=${encodeURIComponent(domainFilter)}`;
+            }
+            const response = await fetch(url);
+            const data = await response.json();
+            const partialDiv = document.getElementById('partial-results');
+            partialDiv.innerHTML = '';
+            if (data.length === 0) {
+                partialDiv.innerHTML = `<p>No URLs found.</p>`;
+                return;
+            }
+            const ul = document.createElement('ul');
+            data.forEach(item => {
+                const li = document.createElement('li');
+                const a = document.createElement('a');
+                a.href = item.url;
+                a.target = '_blank';
+                a.textContent = item.url;
+                li.appendChild(a);
+                if (item.is_valid) {
+                    li.style.color = 'green';
+                } else {
+                    li.style.color = 'orange';
+                }
+                ul.appendChild(li);
+            });
+            partialDiv.appendChild(ul);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchResults();  // Fetch initial results
+            fetchPartialResults();  // Fetch initial partial results
+            setInterval(fetchResults, 10000);  // Refresh results every 10 seconds
+            setInterval(fetchPartialResults, 10000);  // Refresh partial results every 10 seconds
+        });
+    </script>
+</head>
+<body>
+    <h1>Product URL Crawler</h1>
+    <form onsubmit="event.preventDefault(); startCrawler();">
+        <label for="domains">Enter Domains (comma-separated):</label><br>
+        <input type="text" id="domains" name="domains" size="100" placeholder="example1.com, example2.com"><br><br>
+        <button type="submit">Start Crawler</button>
+    </form>
+    <div id="status" class="status"></div>
+    <div id="loader" class="loader"></div>
+
+    <div class="results">
+        <h2>Validated Product URLs:</h2>
+        <label for="domain-filter">Filter by Domain:</label>
+        <input type="text" id="domain-filter" name="domain-filter" size="50" placeholder="example1.com">
+        <button onclick="fetchResults()">Filter</button>
+        <div id="results">
+            <!-- Validated Results will be populated here -->
+        </div>
+    </div>
+    <div class="results">
+        <h2>All Scraped URLs (Partial Results):</h2>
+        <label for="domain-filter">Filter by Domain:</label>
+        <input type="text" id="domain-filter" name="domain-filter" size="50" placeholder="example1.com">
+        <button onclick="fetchPartialResults()">Filter</button>
+        <div id="partial-results">
+            <!-- Partial Results will be populated here -->
+        </div>
+    </div>
+</body>
+</html>
