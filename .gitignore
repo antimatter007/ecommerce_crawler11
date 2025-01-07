@@ -1,1 +1,33 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
 .env
+
+# Docker files
+docker-compose.yml
+docker-compose.override.yml
+
+# Supervisor files
+supervisord.conf
+supervisord.log
+supervisord.pid
+
+# Redis dump file
+dump.rdb
+
+# IDE and editor folders
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Logs
+*.log
+
+# Miscellaneous
+*.pid
+*.swp

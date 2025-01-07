@@ -1,3 +1,5 @@
+# docker-compose.yml
+
 services:
   postgres:
     image: postgres:15
@@ -47,9 +49,11 @@ services:
       - postgres
 
   flower:
-    image: mher/flower
+    image: mher/flower:2.0.1  # Specify a stable version
     container_name: ecommerce_flower
-    command: flower --broker=${CELERY_BROKER_URL} --port=5555
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - FLOWER_PORT=5555
     ports:
       - "5555:5555"
     depends_on:

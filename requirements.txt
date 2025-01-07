@@ -9,3 +9,5 @@ scrapy-playwright
 playwright
 python-dotenv
 supervisor
+flower
+pydantic==1.10.4
