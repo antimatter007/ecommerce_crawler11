@@ -31,3 +31,7 @@ dump.rdb
 # Miscellaneous
 *.pid
 *.swp
+# Supervisor files
+supervisord.conf
+supervisord.log
+supervisord.pid
