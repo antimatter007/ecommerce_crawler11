@@ -8,7 +8,7 @@ from celery import Celery
 from app.database import SessionLocal
 from app.models import ProductURL
 
-# Hardcoded Configuration (example)
+# Hardcoded Config (example)
 CELERY_BROKER_URL = "redis://default:tbLFXmaqfWGHvbXrJELyyTWKbWsrGODH@viaduct.proxy.rlwy.net:11471/0"
 CELERY_RESULT_BACKEND = "redis://default:tbLFXmaqfWGHvbXrJELyyTWKbWsrGODH@viaduct.proxy.rlwy.net:11471/0"
 
@@ -21,49 +21,46 @@ celery = Celery(
     backend=CELERY_RESULT_BACKEND,
 )
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 @celery.task
 def scrape_product_task(url: str):
     """
-    Celery task to run the Flipkart spider on a given URL.
+    Celery task to run the Flipkart spider on a given URL,
+    ensuring we can import ecommerce_crawler items.
     """
     logger.info(f"Starting scraping task for URL: {url}")
 
-    # Generate a unique filename for the output JSON
     unique_id = uuid.uuid4()
-    output_file = f'items_{unique_id}.json'      # The file that Scrapy will write to
+    output_file = f'items_{unique_id}.json'
 
-    # Path to your spider script (adjust if different)
-    spider_script = os.path.join(
-        os.getcwd(), 'ecommerce_crawler', 'spiders', 'flipkart_spider.py'
-    )
+    # Because we run inside /app, we only need a relative path:
+    spider_relative_path = 'ecommerce_crawler/spiders/flipkart_spider.py'
 
     try:
-        # Run Scrapy spider as a subprocess
-        #
-        # * runspider usage:
-        #   scrapy runspider <spider_file> -a <spider_arg>=... -o <file.json:json>
-        #
-        # Important: No trailing semicolon, and remove -t 'json'
-        #
-        subprocess.run([
-            'scrapy',
-            'runspider',
-            spider_script,
-            '-a', f'start_url={url}',
-            '-o', f'{output_file}:json',  
-            # ^ appending :json ensures output is treated as JSON
-        ], check=True)
+        # Important changes:
+        #  1) remove absolute /app from the script path
+        #  2) specify -s PYTHONPATH=/app
+        #  3) set cwd='/app'
+        subprocess.run(
+            [
+                'scrapy',
+                'runspider',
+                spider_relative_path,
+                '-a', f'start_url={url}',
+                '-o', f'{output_file}:json',
+                '-s', 'PYTHONPATH=/app'    # let "import ecommerce_crawler" succeed
+            ],
+            check=True,
+            cwd='/app',  # use /app as working directory
+        )
 
         logger.info(f"Scrapy spider completed for URL: {url}")
 
-        # Read items from output JSON
         with open(output_file, 'r') as f:
             items = json.load(f)
-
         logger.info(f"Loaded {len(items)} items from {output_file}")
 
     except subprocess.CalledProcessError as e:
@@ -79,12 +76,11 @@ def scrape_product_task(url: str):
         return {"url": url, "status": "failed", "error": f"Invalid JSON in {output_file}."}
 
     finally:
-        # Clean up the output file
-        if os.path.exists(output_file):
-            os.remove(output_file)
+        if os.path.exists(os.path.join('/app', output_file)):
+            os.remove(os.path.join('/app', output_file))
             logger.info(f"Removed temporary file {output_file}")
 
-    # Insert scraped items into the database
+    # Insert into DB
     db = SessionLocal()
     try:
         for item in items:
@@ -103,8 +99,9 @@ def scrape_product_task(url: str):
             )
             db.add(product)
         db.commit()
-        logger.info(f"Scraping completed. Inserted data for URL: {url}")
+        logger.info(f"Scraping completed and data inserted for URL: {url}")
         return {"url": url, "status": "scraped"}
+
     except Exception as e:
         db.rollback()
         logger.error(f"Error inserting data into database: {e}")
