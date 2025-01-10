@@ -1,21 +1,18 @@
-# app/celery_worker.py
-
-from celery import Celery
-from app.config import settings
-from app.database import SessionLocal
-from app.models import ProductURL
 import logging
 import subprocess
 import uuid
 import os
 import json
 
-# Hardcoded Configuration
+from celery import Celery
+from app.database import SessionLocal
+from app.models import ProductURL
+
+# Hardcoded Configuration (example)
 CELERY_BROKER_URL = "redis://default:tbLFXmaqfWGHvbXrJELyyTWKbWsrGODH@viaduct.proxy.rlwy.net:11471/0"
 CELERY_RESULT_BACKEND = "redis://default:tbLFXmaqfWGHvbXrJELyyTWKbWsrGODH@viaduct.proxy.rlwy.net:11471/0"
 
 SCRAPERAPI_KEY = "a808071ccff9da6df8e44950f64246c8"
-
 DATABASE_URL = "postgresql://postgres:dCQIJcrivbBKaqIBmEExwVrCcYhurtWl@junction.proxy.rlwy.net:38132/railway"
 
 celery = Celery(
@@ -30,31 +27,40 @@ logger = logging.getLogger(__name__)
 
 @celery.task
 def scrape_product_task(url: str):
+    """
+    Celery task to run the Flipkart spider on a given URL.
+    """
     logger.info(f"Starting scraping task for URL: {url}")
 
-    # Generate a unique filename for the output JSON to avoid conflicts
+    # Generate a unique filename for the output JSON
     unique_id = uuid.uuid4()
-    output_file = f'items_{unique_id}.json'
+    output_file = f'items_{unique_id}.json'      # The file that Scrapy will write to
 
-    # Define the path to your spider script
-    # Adjust the path based on your project structure
-    spider_script = os.path.join(os.getcwd(), 'ecommerce_crawler', 'spiders', 'flipkart_spider.py')
+    # Path to your spider script (adjust if different)
+    spider_script = os.path.join(
+        os.getcwd(), 'ecommerce_crawler', 'spiders', 'flipkart_spider.py'
+    )
 
     try:
-        # Run Scrapy spider as a subprocess using 'runspider'
-        # Ensure that 'scrapy' is in the PATH within your Docker container
+        # Run Scrapy spider as a subprocess
+        #
+        # * runspider usage:
+        #   scrapy runspider <spider_file> -a <spider_arg>=... -o <file.json:json>
+        #
+        # Important: No trailing semicolon, and remove -t 'json'
+        #
         subprocess.run([
             'scrapy',
             'runspider',
             spider_script,
             '-a', f'start_url={url}',
-            '-o', output_file,
-            '-t', 'json'
+            '-o', f'{output_file}:json',  
+            # ^ appending :json ensures output is treated as JSON
         ], check=True)
 
         logger.info(f"Scrapy spider completed for URL: {url}")
 
-        # Read the scraped items from the output JSON file
+        # Read items from output JSON
         with open(output_file, 'r') as f:
             items = json.load(f)
 
@@ -69,11 +75,11 @@ def scrape_product_task(url: str):
         return {"url": url, "status": "failed", "error": f"Output file {output_file} not found."}
 
     except json.JSONDecodeError:
-        logger.error(f"Scrapy output file {output_file} is not a valid JSON.")
+        logger.error(f"Scrapy output file {output_file} is not valid JSON.")
         return {"url": url, "status": "failed", "error": f"Invalid JSON in {output_file}."}
 
     finally:
-        # Clean up the output file after processing
+        # Clean up the output file
         if os.path.exists(output_file):
             os.remove(output_file)
             logger.info(f"Removed temporary file {output_file}")
@@ -88,16 +94,16 @@ def scrape_product_task(url: str):
                 title=item.get('title'),
                 brand=item.get('brand'),
                 model_name=item.get('model_name'),
-                price=float(item.get('price')) if item.get('price') else None,
-                star_rating=float(item.get('star_rating')) if item.get('star_rating') else None,
-                no_rating=int(item.get('no_rating')) if item.get('no_rating') else None,
+                price=float(item['price']) if item.get('price') else None,
+                star_rating=float(item['star_rating']) if item.get('star_rating') else None,
+                no_rating=int(item['no_rating']) if item.get('no_rating') else None,
                 colour=item.get('colour'),
                 storage_cap=item.get('storage_cap'),
                 img_url=item.get('img_url'),
             )
             db.add(product)
         db.commit()
-        logger.info(f"Scraping completed and data inserted for URL: {url}")
+        logger.info(f"Scraping completed. Inserted data for URL: {url}")
         return {"url": url, "status": "scraped"}
     except Exception as e:
         db.rollback()
