@@ -1,11 +1,13 @@
 # app/celery_worker.py
 
 from celery import Celery
-from ecommerce_crawler.spiders.flipkart_spider import FlipkartSpider
-from scrapy.crawler import CrawlerProcess
+from app.config import settings
 from app.database import SessionLocal
 from app.models import ProductURL
 import logging
+import subprocess
+import uuid
+import os
 import json
 
 # Hardcoded Configuration
@@ -29,31 +31,49 @@ logger = logging.getLogger(__name__)
 @celery.task
 def scrape_product_task(url: str):
     logger.info(f"Starting scraping task for URL: {url}")
-    
-    # Configure Scrapy settings
-    process = CrawlerProcess(settings={
-        "FEEDS": {
-            "items.json": {"format": "json"},
-        },
-        "USER_AGENT": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)",
-        "ROBOTSTXT_OBEY": False,
-    })
-    
-    # Start the crawler
-    process.crawl(FlipkartSpider, start_url=url)
-    process.start()  # Blocks until the crawling is finished
-    
-    # After crawling, read the scraped items and insert into the database
+
+    # Generate a unique filename for the output JSON to avoid conflicts
+    unique_id = uuid.uuid4()
+    output_file = f'items_{unique_id}.json'
+
     try:
-        with open('items.json') as f:
+        # Run Scrapy spider as a subprocess
+        # Ensure that 'scrapy' is in the PATH within your Docker container
+        subprocess.run([
+            'scrapy',
+            'crawl',
+            'flipkart_spider',
+            '-a', f'start_url={url}',
+            '-o', output_file
+        ], check=True)
+
+        logger.info(f"Scrapy spider completed for URL: {url}")
+
+        # Read the scraped items from the output JSON file
+        with open(output_file, 'r') as f:
             items = json.load(f)
+
+        logger.info(f"Loaded {len(items)} items from {output_file}")
+
+    except subprocess.CalledProcessError as e:
+        logger.error(f"Scrapy crawl failed for URL: {url} with error: {e}")
+        return {"url": url, "status": "failed", "error": str(e)}
+
     except FileNotFoundError:
-        logger.error("Scraping failed: items.json not found.")
-        return {"url": url, "status": "failed", "error": "Scraping failed: items.json not found."}
+        logger.error(f"Scrapy output file {output_file} not found.")
+        return {"url": url, "status": "failed", "error": f"Output file {output_file} not found."}
+
     except json.JSONDecodeError:
-        logger.error("Scraping failed: items.json is not a valid JSON file.")
-        return {"url": url, "status": "failed", "error": "Scraping failed: items.json is not a valid JSON file."}
-    
+        logger.error(f"Scrapy output file {output_file} is not a valid JSON.")
+        return {"url": url, "status": "failed", "error": f"Invalid JSON in {output_file}."}
+
+    finally:
+        # Clean up the output file after processing
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            logger.info(f"Removed temporary file {output_file}")
+
+    # Insert scraped items into the database
     db = SessionLocal()
     try:
         for item in items:
