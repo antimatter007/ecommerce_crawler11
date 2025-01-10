@@ -24,6 +24,13 @@ DOWNLOADER_MIDDLEWARES = {
     'ecommerce_crawler.middlewares.RotateUserAgentMiddleware': 544,
     'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware': None,  # Disable default
 }
+DOWNLOAD_HANDLERS = {
+    "http": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+    "https": "scrapy_playwright.handler.ScrapyPlaywrightDownloadHandler",
+}
+
+# We want the chromium browser
+PLAYWRIGHT_BROWSER_TYPE = "chromium"
 
 # Enable item pipelines
 ITEM_PIPELINES = {

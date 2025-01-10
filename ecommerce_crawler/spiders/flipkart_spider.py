@@ -91,77 +91,93 @@
 #                 callback=self.parse,
 #                 meta={'original_url': next_page_url}
 #             )
-
+# ecommerce_crawler/spiders/flipkart_playwright_spider.py
 
 import scrapy
-from scrapy import Request
+from scrapy_playwright.page import PageMethod
 from urllib.parse import urljoin
+from ecommerce_crawler.items import MobileDetails
 
-# If you have an items.py with `MobileDetails`, import it.
-# For a quick test, we can just yield dict objects instead.
-# from ecommerce_crawler.items import MobileDetails
 
-class FlipkartSpider(scrapy.Spider):
-    name = 'flipkart_spider'
-    allowed_domains = ['flipkart.com']
+class FlipkartPlaywrightSpider(scrapy.Spider):
+    """
+    Spider that uses Scrapy-Playwright to scrape mobile phone listings from Flipkart.
+    """
+    name = "flipkart_playwright"
+    allowed_domains = ["flipkart.com"]
+    start_urls = [
+        "https://www.flipkart.com/search?q=mobile+phones"
+    ]
+    max_pages = 3  # set smaller for quick test; increase as needed
 
-    # Start with a single test URL
-    start_url = 'https://www.flipkart.com/search?q=mobile+phones'
-
-    # Number of pages to crawl
-    count = 1
-    max_pages = 2  # just do 2 pages for a basic test
-
-    def __init__(self, start_url=None, *args, **kwargs):
+    # We'll track how many pages we've crawled
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        if start_url:
-            self.start_url = start_url
-        self.count = 1
+        self.page_count = 0
 
     def start_requests(self):
-        # Just request the direct page (no proxy).
-        yield Request(url=self.start_url, callback=self.parse)
+        """
+        Start by requesting the first URL with Playwright enabled.
+        """
+        for url in self.start_urls:
+            yield scrapy.Request(
+                url,
+                meta={
+                    "playwright": True,
+                    # We'll wait for the product list container or 
+                    # any selector that ensures content is loaded.
+                    "playwright_page_methods": [
+                        PageMethod("wait_for_selector", "div._1AtVbE")
+                    ],
+                },
+                callback=self.parse
+            )
 
-    def parse(self, response):
-        # Debug log the HTTP status and length of the page
-        self.logger.info(f"FlipkartSpider parse() => status {response.status}, length {len(response.text)}")
+    async def parse(self, response):
+        """
+        Parse the search results page. 
+        Note: we’re in an `async def` because Scrapy-Playwright uses async I/O.
+        """
+        # Log how many product blocks we detect:
+        product_cards = response.css("div._1AtVbE")
+        self.logger.info(f"Found {len(product_cards)} product blocks on page {self.page_count+1}")
 
-        # Let's do a “best guess” CSS to find product containers
-        product_containers = response.css('div._2kHMtA')
-        if not product_containers:
-            self.logger.warning("No product containers found with `div._2kHMtA`. Trying an alternative selector.")
-            # Maybe fallback to another known Flipkart layout:
-            product_containers = response.css('div._4ddWXP')
+        for card in product_cards:
+            # Some blocks on Flipkart are banners or ads. 
+            # We can skip those that don't have price/title.
+            title = card.css("div._4rR01T::text").get()
+            price = card.css("div._30jeq3::text").get()
+            if not title or not price:
+                continue
 
-        # For each container, scrape product details
-        for container in product_containers:
-            link = container.css('a._1fQZEK::attr(href)').get() \
-                   or container.css('a.s1Q9rs::attr(href)').get() \
-                   or container.css('a::attr(href)').get()
+            details = MobileDetails()
+            details["domain"] = "flipkart.com"
+            details["title"] = title
+            details["price"] = price.strip("₹").replace(",", "")
+            # Example: extracting link
+            product_link = card.css("a._1fQZEK::attr(href)").get()
+            if product_link:
+                details["url"] = urljoin(response.url, product_link)
+            # Additional fields:
+            details["brand"] = title.split()[0]
+            details["star_rating"] = card.css("div._3LWZlK::text").get()
+            details["no_rating"] = None  # you can parse next sibling if needed
+            # color / storage could be looked up in the link text, or not available 
+            yield details
 
-            title = container.css('div._4rR01T::text').get() \
-                    or container.css('a.s1Q9rs::text').get()
-
-            price = container.css('div._30jeq3::text').get() \
-                    or container.css('div._30jeq3._16Jk6d::text').get()
-
-            # If we found a product link, yield data
-            if link:
-                absolute_url = urljoin(response.url, link)
-
-                yield {
-                    'domain': 'flipkart.com',
-                    'url': absolute_url,
-                    'title': title,
-                    'price': price.strip('₹') if price else None,
-                    'star_rating': container.css('div._3LWZlK::text').get(),
-                    'no_rating': None,  # We can refine later
-                    'brand': (title.split()[0] if title else None),
-                }
-
-        # Next page logic
-        if self.count < self.max_pages:
-            self.count += 1
-            next_page_url = f"{self.start_url}&page={self.count}"
-            self.logger.info(f"Queuing next page: {next_page_url}")
-            yield Request(url=next_page_url, callback=self.parse)
+        # Next pages
+        self.page_count += 1
+        if self.page_count < self.max_pages:
+            next_page_url = response.css("a._1LKTO3::attr(href)").get()  # typical 'Next' link
+            if next_page_url:
+                absolute_url = response.urljoin(next_page_url)
+                yield scrapy.Request(
+                    absolute_url,
+                    meta={
+                        "playwright": True,
+                        "playwright_page_methods": [
+                            PageMethod("wait_for_selector", "div._1AtVbE")
+                        ],
+                    },
+                    callback=self.parse
+                )

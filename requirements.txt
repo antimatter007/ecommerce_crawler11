@@ -1,13 +1,16 @@
-fastapi
-uvicorn
-celery
-redis
-sqlalchemy
-psycopg2-binary
-scrapy
-scrapy-playwright
-playwright
 python-dotenv
 supervisor
 flower
 pydantic==1.10.4
+scrapy==2.12.0
+scrapy-playwright==0.0.29
+playwright==1.38.0
+
+celery==5.4.0
+redis==4.5.5
+
+psycopg2-binary==2.9.7  # or 'psycopg2' if you prefer
+SQLAlchemy==2.0.9
+
+fastapi==0.95.2
+uvicorn==0.22.0
