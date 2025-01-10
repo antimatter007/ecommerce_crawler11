@@ -36,15 +36,20 @@ def scrape_product_task(url: str):
     unique_id = uuid.uuid4()
     output_file = f'items_{unique_id}.json'
 
+    # Define the path to your spider script
+    # Adjust the path based on your project structure
+    spider_script = os.path.join(os.getcwd(), 'ecommerce_crawler', 'spiders', 'flipkart_spider.py')
+
     try:
-        # Run Scrapy spider as a subprocess
+        # Run Scrapy spider as a subprocess using 'runspider'
         # Ensure that 'scrapy' is in the PATH within your Docker container
         subprocess.run([
             'scrapy',
-            'crawl',
-            'flipkart_spider',
+            'runspider',
+            spider_script,
             '-a', f'start_url={url}',
-            '-o', output_file
+            '-o', output_file,
+            '-t', 'json'
         ], check=True)
 
         logger.info(f"Scrapy spider completed for URL: {url}")
