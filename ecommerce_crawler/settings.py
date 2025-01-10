@@ -49,4 +49,4 @@ USER_AGENTS_LIST = [
 ]
 
 # ScraperAPI Key
-SCRAPERAPI_KEY = 'YOUR-SCRAPERAPI-KEY'  # Replace with your actual ScraperAPI key
+SCRAPERAPI_KEY = 'a808071ccff9da6df8e44950f64246c8'  # Replace with your actual ScraperAPI key

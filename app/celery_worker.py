@@ -3,12 +3,11 @@ import subprocess
 import uuid
 import os
 import json
-
 from celery import Celery
 from app.database import SessionLocal
 from app.models import ProductURL
 
-# Hardcoded Config (example)
+# Hardcoded config for illustration:
 CELERY_BROKER_URL = "redis://default:tbLFXmaqfWGHvbXrJELyyTWKbWsrGODH@viaduct.proxy.rlwy.net:11471/0"
 CELERY_RESULT_BACKEND = "redis://default:tbLFXmaqfWGHvbXrJELyyTWKbWsrGODH@viaduct.proxy.rlwy.net:11471/0"
 
@@ -29,37 +28,39 @@ logger = logging.getLogger(__name__)
 def scrape_product_task(url: str):
     """
     Celery task to run the Flipkart spider on a given URL,
-    ensuring we can import ecommerce_crawler items.
+    ensuring ecommerce_crawler.* is importable.
     """
     logger.info(f"Starting scraping task for URL: {url}")
 
     unique_id = uuid.uuid4()
     output_file = f'items_{unique_id}.json'
-
-    # Because we run inside /app, we only need a relative path:
     spider_relative_path = 'ecommerce_crawler/spiders/flipkart_spider.py'
 
+    # Copy existing environment, but also add PYTHONPATH
+    env_dict = os.environ.copy()
+    env_dict['PYTHONPATH'] = '/app'  # crucial for imports like `ecommerce_crawler.*`
+
     try:
-        # Important changes:
-        #  1) remove absolute /app from the script path
-        #  2) specify -s PYTHONPATH=/app
-        #  3) set cwd='/app'
+        # 1) We'll run "scrapy runspider" with the relative path
+        # 2) We set `cwd="/app"` so the spider file is found relative to /app
+        # 3) We use `env=env_dict` so that PYTHONPATH is set
         subprocess.run(
             [
                 'scrapy',
                 'runspider',
                 spider_relative_path,
                 '-a', f'start_url={url}',
+                # We can store results as "filename.json:json" or just "filename.json"
                 '-o', f'{output_file}:json',
-                '-s', 'PYTHONPATH=/app'    # let "import ecommerce_crawler" succeed
             ],
             check=True,
-            cwd='/app',  # use /app as working directory
+            cwd='/app',
+            env=env_dict,  # ensure PYTHONPATH is recognized
         )
 
         logger.info(f"Scrapy spider completed for URL: {url}")
 
-        with open(output_file, 'r') as f:
+        with open(output_file, 'r', encoding='utf-8') as f:
             items = json.load(f)
         logger.info(f"Loaded {len(items)} items from {output_file}")
 
@@ -68,16 +69,18 @@ def scrape_product_task(url: str):
         return {"url": url, "status": "failed", "error": str(e)}
 
     except FileNotFoundError:
-        logger.error(f"Scrapy output file {output_file} not found.")
-        return {"url": url, "status": "failed", "error": f"Output file {output_file} not found."}
+        logger.error(f"Output file not found: {output_file}")
+        return {"url": url, "status": "failed", "error": f"File {output_file} not found."}
 
     except json.JSONDecodeError:
-        logger.error(f"Scrapy output file {output_file} is not valid JSON.")
-        return {"url": url, "status": "failed", "error": f"Invalid JSON in {output_file}."}
+        logger.error(f"Invalid JSON in {output_file}.")
+        return {"url": url, "status": "failed", "error": f"JSON decode error in {output_file}."}
 
     finally:
-        if os.path.exists(os.path.join('/app', output_file)):
-            os.remove(os.path.join('/app', output_file))
+        # Clean up
+        full_output_path = os.path.join('/app', output_file)
+        if os.path.exists(full_output_path):
+            os.remove(full_output_path)
             logger.info(f"Removed temporary file {output_file}")
 
     # Insert into DB
